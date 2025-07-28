@@ -103,16 +103,13 @@
   </div>
 
 <script>
-  // IMPORTANTE: Debes actualizar esta URL con la de tu Apps Script desplegado
-  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwI95jnKF9gMeMDtHDtBKi3m9Y0W66u6sSzL1b-FBUYZ-vl80sNVzMy0G2up3wC3d4_Ng/exec";
-
-  let currentMatches = [];
+  // IMPORTANTE: Reemplaza esta URL con la URL de tu propio Web App desplegado
+  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxLE6msPXzxSAwGeEEhgUDwKnd8L8JPxRwCAK5ItROQYmjSzSSvcTszH9Xde2N15ZvElw/exec";
 
   document.getElementById('btn-buscar').addEventListener('click', buscarPedido);
   document.getElementById('btn-guardar').addEventListener('click', guardarEntrega);
   document.getElementById('btn-cancelar').addEventListener('click', cancelarEntrega);
   
-  // Permitir buscar con Enter
   document.getElementById('numero-pedido').addEventListener('keypress', function(e) {
     if (e.key === 'Enter') {
       buscarPedido();
@@ -127,7 +124,7 @@
     const container = document.getElementById('resultado-busqueda');
     container.innerHTML = `<div class="alert alert-${tipo} alert-dismissible fade show" role="alert">
       ${mensaje}
-      <button type="button" class="close" data-dismiss="alert">
+      <button type="button" class="close" data-dismiss="alert" aria-label="Cerrar">
         <span>&times;</span>
       </button>
     </div>`;
@@ -136,7 +133,7 @@
   function mostrarDebug(info) {
     if (document.getElementById('debug-mode').checked) {
       const container = document.getElementById('resultado-busqueda');
-      container.innerHTML += `<div class="debug-info"><strong>Debug:</strong><br>${JSON.stringify(info, null, 2)}</div>`;
+      container.innerHTML += `<div class="debug-info"><strong>Debug:</strong><br><pre>${JSON.stringify(info, null, 2)}</pre></div>`;
     }
   }
 
@@ -151,28 +148,27 @@
     document.getElementById('btn-buscar').disabled = true;
     document.getElementById('resultado-busqueda').innerHTML = '';
     document.getElementById('formulario-entrega').style.display = 'none';
-    currentMatches = [];
-
-    console.log('Buscando pedido:', numeroPedido);
 
     fetch(SCRIPT_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8'
-      },
       body: JSON.stringify({
         action: 'buscarPedido',
         payload: { numeroPedido: numeroPedido }
-      })
+      }),
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      }
     })
-    .then(response => {
-      console.log('Respuesta del servidor:', response);
-      return response.json();
-    })
+    .then(response => response.json())
     .then(data => {
-      console.log('Datos recibidos:', data);
+      mostrarLoader(false);
+      document.getElementById('btn-buscar').disabled = false;
       mostrarDebug(data);
-      procesarResultadoBusqueda(data);
+      if (data.success && data.data) {
+        mostrarFormularioEntrega(data.data);
+      } else {
+        mostrarAlerta(data.message || 'No se encontraron resultados.', 'warning');
+      }
     })
     .catch(error => {
       console.error('Error en búsqueda:', error);
@@ -182,21 +178,7 @@
     });
   }
 
-  function procesarResultadoBusqueda(response) {
-    mostrarLoader(false);
-    document.getElementById('btn-buscar').disabled = false;
-
-    if (response.success && response.data) {
-      // Respuesta exitosa con un pedido encontrado
-      mostrarFormularioEntrega(response.data);
-    } else {
-      // No se encontraron resultados o hubo error
-      mostrarAlerta(response.message || 'No se encontraron resultados', 'warning');
-    }
-  }
-
   function mostrarFormularioEntrega(data) {
-    // Llenar información del pedido
     document.getElementById('info-pedido-seleccionado').innerHTML = `
       <div class="row">
         <div class="col-md-6"><strong>Pedido:</strong> ${data.numeroPedido}</div>
@@ -212,16 +194,17 @@
       ${data.deliverabilityMessage ? `<div class="alert alert-info mt-2">${data.deliverabilityMessage}</div>` : ''}
     `;
 
-    // Llenar campos ocultos
     document.getElementById('sheetRow').value = data.sheetRow;
     document.getElementById('pedidoOrigen').value = data.origen;
     document.getElementById('pedidoNumero').value = data.numeroPedido;
 
-    // Mostrar formulario
     document.getElementById('formulario-entrega').style.display = 'block';
-    
-    // Mostrar mensaje de éxito
-    mostrarAlerta('Pedido encontrado. Complete los datos de entrega.', 'success');
+    if(data.canDeliver){
+        mostrarAlerta('Pedido encontrado. Complete los datos de entrega.', 'success');
+        document.getElementById('btn-guardar').disabled = false;
+    } else {
+        document.getElementById('btn-guardar').disabled = true;
+    }
   }
 
   function cancelarEntrega() {
@@ -229,7 +212,6 @@
     document.getElementById('numero-pedido').value = '';
     document.getElementById('resultado-busqueda').innerHTML = '';
     
-    // Limpiar formulario
     document.getElementById('entregado-por').value = '';
     document.getElementById('recibido-por').value = '';
     document.getElementById('foto1').value = '';
@@ -243,7 +225,7 @@
     const foto1 = document.getElementById('foto1');
 
     if (!entregadoPor || !recibidoPor || foto1.files.length === 0) {
-      mostrarAlerta('Debe completar todos los campos obligatorios y seleccionar al menos la Foto 1.', 'danger');
+      mostrarAlerta('Debe completar "Entregado por", "Recibido por" y al menos la Foto 1.', 'danger');
       return;
     }
 
@@ -252,17 +234,13 @@
     mostrarAlerta('Guardando entrega, por favor espere...', 'info');
 
     try {
-      // Procesar archivos de fotos
       const fotosPromesas = [
         document.getElementById('foto1'),
         document.getElementById('foto2'),
         document.getElementById('foto3')
-      ].map(input => procesarArchivo(input));
+      ].filter(input => input.files.length > 0).map(input => procesarArchivo(input));
 
-      const fotosBase64 = await Promise.all(fotosPromesas);
-      const fotosValidas = fotosBase64.filter(f => f !== null);
-
-      console.log(`Procesadas ${fotosValidas.length} fotos`);
+      const fotosValidas = await Promise.all(fotosPromesas);
 
       const deliveryData = {
         sheetRow: parseInt(document.getElementById('sheetRow').value),
@@ -272,25 +250,30 @@
         recibidoPor: recibidoPor,
         fotos: fotosValidas
       };
-
-      console.log('Enviando datos de entrega:', deliveryData);
+      
       mostrarDebug(deliveryData);
 
       fetch(SCRIPT_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'text/plain;charset=utf-8'
-        },
         body: JSON.stringify({
           action: 'registrarEntrega',
           payload: deliveryData
-        })
+        }),
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8'
+        }
       })
       .then(response => response.json())
-      .then(response => {
-        console.log('Respuesta de entrega:', response);
-        mostrarDebug(response);
-        procesarResultadoEntrega(response);
+      .then(data => {
+        mostrarLoader(false);
+        mostrarDebug(data);
+        if (data.success) {
+          mostrarAlerta(data.message, 'success');
+          setTimeout(cancelarEntrega, 2500);
+        } else {
+          mostrarAlerta(data.message || 'Error desconocido al guardar.', 'danger');
+          document.getElementById('btn-guardar').disabled = false;
+        }
       })
       .catch(error => {
         console.error('Error guardando entrega:', error);
@@ -309,44 +292,24 @@
 
   function procesarArchivo(fileInput) {
     return new Promise((resolve, reject) => {
-      if (fileInput.files.length > 0) {
-        const file = fileInput.files[0];
-        const reader = new FileReader();
-        
-        reader.onload = (e) => {
-          const base64Data = e.target.result.split(',')[1];
-          resolve({
-            base64Data: base64Data,
-            mimeType: file.type,
-            fileName: file.name
-          });
-        };
-        
-        reader.onerror = (error) => reject(error);
-        reader.readAsDataURL(file);
-      } else {
-        resolve(null);
-      }
+      const file = fileInput.files[0];
+      const reader = new FileReader();
+      
+      reader.onload = (e) => {
+        const base64Data = e.target.result.split(',')[1];
+        resolve({
+          base64Data: base64Data,
+          mimeType: file.type,
+          fileName: file.name
+        });
+      };
+      
+      reader.onerror = (error) => reject(error);
+      reader.readAsDataURL(file);
     });
-  }
-
-  function procesarResultadoEntrega(response) {
-    mostrarLoader(false);
-    document.getElementById('btn-guardar').disabled = false;
-
-    if (response.success) {
-      mostrarAlerta(response.message, 'success');
-      // Limpiar y ocultar formulario
-      setTimeout(() => {
-        cancelarEntrega();
-      }, 2000);
-    } else {
-      mostrarAlerta(response.message || 'Error desconocido al guardar entrega', 'danger');
-    }
   }
 </script>
 
-<!-- Bootstrap JS para funcionalidades adicionales -->
 <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script>
 
